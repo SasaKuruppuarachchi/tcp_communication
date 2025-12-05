@@ -1,5 +1,7 @@
 import socket
 import os
+import sys
+import argparse
 
 def send_file(file_path, host='0.0.0.0', port=12344):
     # Create a socket object
@@ -44,5 +46,29 @@ def send_file(file_path, host='0.0.0.0', port=12344):
             client_socket.close()
 
 if __name__ == "__main__":
-    FILE_PATH = "file_to_send.txt"  # Replace with your file path
-    send_file(FILE_PATH)
+    parser = argparse.ArgumentParser(description="Send a file over TCP")
+    parser.add_argument(
+        "-f", "--file",
+        type=str,
+        help="Path to the file to send"
+    )
+    parser.add_argument(
+        "-p", "--port",
+        type=int,
+        default=12344,
+        help="Port to listen on (default: 12344)"
+    )
+    
+    args = parser.parse_args()
+    
+    # Get file path from arguments or prompt user
+    file_path = args.file
+    if not file_path:
+        file_path = input("Please enter the file path: ")
+    
+    # Validate file path is not empty
+    if not file_path:
+        print("Error: File path cannot be empty.")
+        sys.exit(1)
+    
+    send_file(file_path, port=args.port)

@@ -1,4 +1,6 @@
 import socket
+import argparse
+import sys
 
 def receive_file(server_ip, server_port=12344, save_dir="."):
     # Create a socket object
@@ -38,6 +40,15 @@ def receive_file(server_ip, server_port=12344, save_dir="."):
         client_socket.close()
 
 if __name__ == "__main__":
-    # SERVER_IP = "192.168.2.64"  # Replace with Computer 1's IP
-    SERVER_IP = "127.0.0.1" 
-    receive_file(SERVER_IP)
+    parser = argparse.ArgumentParser(description="Receive a file over TCP")
+    parser.add_argument("-s", "--server", type=str, help="Server IP address")
+    parser.add_argument("-p", "--port", type=int, default=12344, help="Server port (default: 12344)")
+
+    args = parser.parse_args()
+
+    server_ip = args.server or input("Enter server IP: ").strip()
+    if not server_ip:
+        print("Error: Server IP is required.")
+        sys.exit(1)
+
+    receive_file(server_ip, server_port=args.port)
