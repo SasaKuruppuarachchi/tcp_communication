@@ -21,6 +21,7 @@ Interactive CLI and ROS 2 autostart logger for recording ROS 2 bags and transfer
 - Settings editor split into Logger and TCP (Server/Client) sections with colorized output.
 - TCP transfer automatically blocked while logging is active.
 - ROS 2 autostart node that listens to `/fmu/out/vehicle_status` and starts recording on arming.
+- Interactive bag playback selector with arrow-key list and `q` to stop playback.
 - Optional background recording via `--background`.
 
 ## Quick start
@@ -38,6 +39,7 @@ Interactive CLI and ROS 2 autostart logger for recording ROS 2 bags and transfer
 - Show status (background only): `agi-logger record status`
 - Start ROS 2 autostart node: `agi-logger ros2 autostart`
 - Open settings menu: `agi-logger settings`
+- Play a bag (interactive list): `agi-logger play`
 
 Configuration defaults are loaded from `cfg/configs.yaml`.
 
@@ -45,6 +47,7 @@ Configuration defaults are loaded from `cfg/configs.yaml`.
 Running `agi-logger` without arguments shows:
 - Record: previews logger settings, then Enter = start / e = edit logger settings.
 - Transfer: choose server/client, preview settings, then Enter = start / e = edit that section.
+- Play: arrow-key list of bag directories under `logger.bag_path`.
 - Settings: opens the editor directly.
 
 ## Settings editor
@@ -63,6 +66,11 @@ Uses the config values in `cfg/configs.yaml`.
 - Auto mode: `agi-logger tcp run` (respects `tcp_file_communication.mode`)
 
 TCP transfer is disabled while recording is active.
+
+## Bag playback
+`agi-logger play` opens a scrollable list of bag directories under `logger.bag_path`.
+- Use UP/DOWN to select, Enter to play, `c` to change directory, `q` to go back.
+- During playback, `q` stops playback and returns to the list. Built-in rosbag controls (space, arrows) remain available.
 
 ## Bash scripts
 The repository includes legacy scripts for reference:
