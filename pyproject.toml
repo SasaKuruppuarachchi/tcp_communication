@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agi-logger"
+version = "0.1.0"
+description = "AGI logger CLI and ROS2 autostart node"
+requires-python = ">=3.8"
+dependencies = [
+  "PyYAML>=6.0"
+]
+
+[tool.setuptools]
+packages = ["agi_logger"]
+
+[project.scripts]
+agi-logger = "agi_logger.cli:main"

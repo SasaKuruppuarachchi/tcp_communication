@@ -1,0 +1,438 @@
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+from typing import Any, Dict
+
+import yaml
+
+from .config import (
+    DEFAULT_CONFIG_PATH,
+    ConfigError,
+    iter_nested_keys,
+    load_raw_config,
+    save_raw_config,
+    update_nested_value,
+)
+from .logging_manager import RecorderManager
+from .tcp_transfer import TcpClientConfig, TcpServerConfig, receive_file, send_file
+
+RESET = "\033[0m"
+BOLD = "\033[1m"
+GREEN = "\033[32m"
+ORANGE = "\033[38;2;255;165;0m"
+YELLOW = "\033[33m"
+CYAN = "\033[36m"
+MAGENTA = "\033[35m"
+RED = "\033[31m"
+LIGHT_GRAY = "\033[90m"
+
+
+def _load_config(config_path: Path) -> Dict[str, Any]:
+    return load_raw_config(config_path)
+
+
+def _get_manager(config_path: Path) -> RecorderManager:
+    config = _load_config(config_path)
+    return RecorderManager(config, config_path)
+
+
+def _print_status(manager: RecorderManager) -> int:
+    state = manager.status()
+    if not state or not manager.is_recording():
+        print("Recording inactive")
+        return 1
+    print("Recording active")
+    print(f"Bag name: {state.bag_name}")
+    print(f"Bag path: {state.bag_path}")
+    print(f"PID: {state.pid}")
+    return 0
+
+
+def _tcp_allowed(manager: RecorderManager) -> None:
+    if manager.is_recording():
+        raise RuntimeError("TCP transfer disabled while logging is active")
+
+
+def _parse_value(raw: str) -> Any:
+    lowered = raw.lower()
+    if lowered in {"true", "false"}:
+        return lowered == "true"
+    if lowered in {"null", "none"}:
+        return None
+    try:
+        if "." in raw:
+            return float(raw)
+        return int(raw)
+    except ValueError:
+        return raw
+
+
+def _settings_menu(config_path: Path, start_section: str | None = None) -> None:
+    config = _load_config(config_path)
+
+    while True:
+        if start_section == "logger":
+            choice = "2"
+        elif start_section == "tcp_server":
+            choice = "3_server"
+        elif start_section == "tcp_client":
+            choice = "3_client"
+        else:
+            print(f"\n{BOLD}{CYAN}Settings menu{RESET}")
+            print(f"{GREEN}1){RESET} Show config")
+            print(f"{GREEN}2){RESET} Edit logger settings")
+            print(f"{GREEN}3){RESET} Edit TCP transfer settings")
+            print(f"{GREEN}4){RESET} Save")
+            print(f"{GREEN}5){RESET} Exit")
+            choice = input(f"{BOLD}Select option:{RESET} ").strip()
+
+        if choice == "1":
+            print(f"{MAGENTA}--- config ---{RESET}")
+            print(yaml.safe_dump(config, sort_keys=False))
+        elif choice in {"2", "3", "3_server", "3_client"}:
+            if choice == "2":
+                section_key = "agi_logger.logger"
+                section = config
+                for part in section_key.split("."):
+                    section = section.get(part, {}) if isinstance(section, dict) else {}
+                entries = list(iter_nested_keys(section, section_key))
+            else:
+                if choice in {"3_server", "3_client"}:
+                    mode_choice = "server" if choice == "3_server" else "client"
+                else:
+                    mode_choice = input(
+                        f"{BOLD}Edit TCP settings for{RESET} [server/client]: "
+                    ).strip().lower()
+                    if mode_choice not in {"server", "client"}:
+                        print(f"{RED}Invalid selection{RESET}")
+                        continue
+                section_key = f"agi_logger.tcp_file_communication.{mode_choice}"
+                section = config
+                for part in section_key.split("."):
+                    section = section.get(part, {}) if isinstance(section, dict) else {}
+                entries = list(iter_nested_keys(section, section_key))
+            if not entries:
+                print("No editable keys found")
+                continue
+            print(f"{BOLD}Available keys:{RESET}")
+            display_entries = []
+            for full_key, value in entries:
+                display_name = full_key.split(".")[-1]
+                display_entries.append((display_name, full_key, value))
+            for idx, (display_name, _, value) in enumerate(display_entries, start=1):
+                print(
+                    f"{CYAN}{idx}){RESET} {display_name} = {LIGHT_GRAY}{value}{RESET}"
+                )
+            raw_index = input(
+                f"{BOLD}Select number to edit{RESET} (or press Enter to go back): "
+            ).strip()
+            if not raw_index:
+                return
+            if not raw_index.isdigit():
+                print(f"{RED}Invalid selection{RESET}")
+                continue
+            index = int(raw_index)
+            if index < 1 or index > len(display_entries):
+                print(f"{RED}Selection out of range{RESET}")
+                continue
+            display_name, full_key, current_value = display_entries[index - 1]
+            print(
+                f"{YELLOW}Editing{RESET} {display_name} (current: {current_value})"
+            )
+            value = input("Enter new value (press Enter to keep current): ").strip()
+            if value == "":
+                print(f"{YELLOW}No change{RESET}")
+                continue
+            update_nested_value(config, full_key, _parse_value(value))
+            print(f"{GREEN}Value updated{RESET}")
+        elif choice == "4":
+            save_raw_config(config, config_path)
+            print(f"{GREEN}Saved to {config_path}{RESET}")
+        elif choice == "5":
+            return
+        else:
+            print(f"{RED}Invalid selection{RESET}")
+
+        start_section = None
+
+
+def _record_start(args: argparse.Namespace) -> int:
+    manager = _get_manager(args.config)
+    state = manager.start_recording(verbose=True, foreground=not args.background)
+    print(f"Started recording: {state.bag_name}")
+    return 0
+
+
+def _record_stop(args: argparse.Namespace) -> int:
+    manager = _get_manager(args.config)
+    manager.stop_recording()
+    print("Recording stopped")
+    return 0
+
+
+def _record_status(args: argparse.Namespace) -> int:
+    manager = _get_manager(args.config)
+    return _print_status(manager)
+
+
+def _bag_play(args: argparse.Namespace) -> int:
+    cmd = ["ros2", "bag", "play", args.bag]
+    if args.rate:
+        cmd += ["--rate", str(args.rate)]
+    if args.loop:
+        cmd += ["--loop"]
+    print("Running: " + " ".join(cmd))
+    return _run_command(cmd)
+
+
+def _tcp_send(args: argparse.Namespace) -> int:
+    manager = _get_manager(args.config)
+    _tcp_allowed(manager)
+
+    config = _load_config(args.config)
+    tcp_cfg = config["agi_logger"]["tcp_file_communication"]
+    server_cfg = tcp_cfg.get("server", {})
+
+    server = TcpServerConfig(
+        host=args.host or server_cfg.get("host", "0.0.0.0"),
+        port=args.port or server_cfg.get("port", 6000),
+        file_path=args.file or server_cfg.get("file_path", ""),
+    )
+    if not server.file_path:
+        raise RuntimeError("File path is required for TCP send")
+    send_file(server)
+    return 0
+
+
+def _tcp_receive(args: argparse.Namespace) -> int:
+    manager = _get_manager(args.config)
+    _tcp_allowed(manager)
+
+    config = _load_config(args.config)
+    tcp_cfg = config["agi_logger"]["tcp_file_communication"]
+    client_cfg = tcp_cfg.get("client", {})
+
+    client = TcpClientConfig(
+        host=args.host or client_cfg.get("host", "localhost"),
+        port=args.port or client_cfg.get("port", 6000),
+        destination_path=args.dest or client_cfg.get("destination_path", "."),
+    )
+    receive_file(client)
+    return 0
+
+
+def _tcp_run(args: argparse.Namespace) -> int:
+    manager = _get_manager(args.config)
+    _tcp_allowed(manager)
+
+    config = _load_config(args.config)
+    tcp_cfg = config["agi_logger"]["tcp_file_communication"]
+    mode = str(tcp_cfg.get("mode", "ask")).lower()
+
+    if mode == "ask":
+        choice = input("Start as server or client? [server/client]: ").strip().lower()
+        mode = choice or "ask"
+
+    if mode == "server":
+        args.file = args.file or tcp_cfg.get("server", {}).get("file_path")
+        args.host = args.host or tcp_cfg.get("server", {}).get("host")
+        args.port = args.port or tcp_cfg.get("server", {}).get("port")
+        return _tcp_send(args)
+
+    if mode == "client":
+        args.host = args.host or tcp_cfg.get("client", {}).get("host")
+        args.port = args.port or tcp_cfg.get("client", {}).get("port")
+        args.dest = args.dest or tcp_cfg.get("client", {}).get("destination_path")
+        return _tcp_receive(args)
+
+    raise RuntimeError(f"Unsupported tcp mode: {mode}")
+
+
+def _ros2_autostart(args: argparse.Namespace) -> int:
+    from .ros2_node import run_autostart_node
+
+    run_autostart_node(args.config)
+    return 0
+
+
+def _run_command(cmd: list[str]) -> int:
+    import subprocess
+
+    try:
+        process = subprocess.run(cmd, check=False)
+        return process.returncode
+    except FileNotFoundError:
+        print("Command not found. Ensure ROS 2 is installed and available in PATH.")
+        return 1
+
+
+def _interactive_menu(parser: argparse.ArgumentParser, config_path: Path) -> int:
+    title_lines = [
+        "      █████╗  ██████╗ ██╗██████╗ ██╗██╗  ██╗ ",
+        "     ██╔══██╗██╔════╝ ██║██╔══██╗██║╚██╗██╔╝ ",
+        "     ███████║██║  ███╗██║██████╔╝██║ ╚███╔╝  ",
+        "     ██╔══██║██║   ██║██║██╔═══╝ ██║ ██╔██╗  ",
+        "     ██║  ██║╚██████╔╝██║██║     ██║██╔╝ ██╗ ",
+        "     ╚═╝  ╚═╝ ╚═════╝ ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝ ",
+
+        "██╗      ██████╗  ██████╗  ██████╗ ███████╗██████╗ ",
+        "██║     ██╔═══██╗██╔════╝ ██╔════╝ ██╔════╝██╔══██╗",
+        "██║     ██║   ██║██║  ███╗██║  ███╗█████╗  ██████╔╝",
+        "██║     ██║   ██║██║   ██║██║   ██║██╔══╝  ██╔══██╗",
+        "███████╗╚██████╔╝╚██████╔╝╚██████╔╝███████╗██║  ██║",
+        "╚══════╝ ╚═════╝  ╚═════╝  ╚═════╝ ╚══════╝╚═╝  ╚═╝",
+    ]
+
+
+    print()
+    for line in title_lines:
+        print(f"{ORANGE}{line}{RESET}")
+    print(f"{CYAN}    Advanced ROS2 logging for Agibix Platform{RESET}\n")
+    print(f"{GREEN}1){RESET} Record")
+    print(f"{GREEN}2){RESET} Transfer")
+    print(f"{GREEN}3){RESET} Settings")
+    print(f"{GREEN}4){RESET} Exit")
+    choice = input(f"{BOLD}Select option:{RESET} ").strip()
+
+    if choice == "1":
+        config = _load_config(config_path)
+        logger_cfg = config.get("agi_logger", {}).get("logger", {})
+        print(f"\n{BOLD}{CYAN}Record settings preview{RESET}")
+        for key, value in logger_cfg.items():
+            print(f"{CYAN}- {key}{RESET}: {LIGHT_GRAY}{value}{RESET}")
+        action = input(
+            f"{BOLD}Continue recording?{RESET} [Enter = start / e = edit / n = back]: "
+        ).strip().lower()
+        if action == "e":
+            _settings_menu(config_path, start_section="logger")
+            return 0
+        if action in {"", "y"}:
+            args = parser.parse_args(["--config", str(config_path), "record", "start"])
+            return args.func(args)
+        return 0
+
+    if choice == "2":
+        print(f"\n{BOLD}{CYAN}Transfer{RESET}")
+        print(f"{GREEN}1){RESET} Server")
+        print(f"{GREEN}2){RESET} Client")
+        print(f"{GREEN}3){RESET} Back")
+        sub = input(f"{BOLD}Select option:{RESET} ").strip()
+        if sub not in {"1", "2"}:
+            return 0
+
+        config = _load_config(config_path)
+        tcp_cfg = config.get("agi_logger", {}).get("tcp_file_communication", {})
+        mode = "server" if sub == "1" else "client"
+        mode_cfg = tcp_cfg.get(mode, {})
+
+        print(f"\n{BOLD}{CYAN}TCP {mode} settings preview{RESET}")
+        for key, value in mode_cfg.items():
+            print(f"{CYAN}- {key}{RESET}: {LIGHT_GRAY}{value}{RESET}")
+        action = input(
+            f"{BOLD}Continue transfer?{RESET} [Enter = start / e = edit / n = back]: "
+        ).strip().lower()
+        if action == "e":
+            _settings_menu(
+                config_path,
+                start_section="tcp_server" if mode == "server" else "tcp_client",
+            )
+            return 0
+        if action in {"", "y"}:
+            cmd = "send" if mode == "server" else "receive"
+            args = parser.parse_args(["--config", str(config_path), "tcp", cmd])
+            return args.func(args)
+        return 0
+
+    if choice == "3":
+        args = parser.parse_args(["--config", str(config_path), "settings"])
+        return args.func(args)
+
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="agi-logger", description="AGI logger CLI")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG_PATH,
+        help=f"Config file path (default: {DEFAULT_CONFIG_PATH})",
+    )
+
+    subparsers = parser.add_subparsers(dest="command")
+
+    record_parser = subparsers.add_parser("record", help="Manage bag recording")
+    record_sub = record_parser.add_subparsers(dest="record_cmd", required=True)
+
+    record_start = record_sub.add_parser("start", help="Start recording")
+    record_start.add_argument(
+        "--background",
+        action="store_true",
+        help="Run in background (Ctrl+C not handled; use record stop)",
+    )
+    record_start.set_defaults(func=_record_start)
+
+    record_stop = record_sub.add_parser("stop", help="Stop recording")
+    record_stop.set_defaults(func=_record_stop)
+
+    record_status = record_sub.add_parser("status", help="Show recording status")
+    record_status.set_defaults(func=_record_status)
+
+    bag_parser = subparsers.add_parser("bag", help="Bag utilities")
+    bag_sub = bag_parser.add_subparsers(dest="bag_cmd", required=True)
+    bag_play = bag_sub.add_parser("play", help="Play a bag")
+    bag_play.add_argument("bag", help="Bag path")
+    bag_play.add_argument("--rate", type=float, default=1.0, help="Playback rate")
+    bag_play.add_argument("--loop", action="store_true", help="Loop playback")
+    bag_play.set_defaults(func=_bag_play)
+
+    tcp_parser = subparsers.add_parser("tcp", help="TCP file transfer")
+    tcp_sub = tcp_parser.add_subparsers(dest="tcp_cmd", required=True)
+
+    tcp_send = tcp_sub.add_parser("send", help="Send a file over TCP")
+    tcp_send.add_argument("--file", help="File path to send")
+    tcp_send.add_argument("--host", help="Server host")
+    tcp_send.add_argument("--port", type=int, help="Server port")
+    tcp_send.set_defaults(func=_tcp_send)
+
+    tcp_receive = tcp_sub.add_parser("receive", help="Receive a file over TCP")
+    tcp_receive.add_argument("--host", help="Server host")
+    tcp_receive.add_argument("--port", type=int, help="Server port")
+    tcp_receive.add_argument("--dest", help="Destination directory")
+    tcp_receive.set_defaults(func=_tcp_receive)
+
+    tcp_run = tcp_sub.add_parser("run", help="Use configured TCP mode")
+    tcp_run.add_argument("--file", help="File path to send (server mode)")
+    tcp_run.add_argument("--host", help="Host override")
+    tcp_run.add_argument("--port", type=int, help="Port override")
+    tcp_run.add_argument("--dest", help="Destination directory (client mode)")
+    tcp_run.set_defaults(func=_tcp_run)
+
+    settings_parser = subparsers.add_parser("settings", help="Open settings menu")
+    settings_parser.set_defaults(func=lambda args: _settings_menu(args.config) or 0)
+
+    ros2_parser = subparsers.add_parser("ros2", help="ROS 2 utilities")
+    ros2_sub = ros2_parser.add_subparsers(dest="ros2_cmd", required=True)
+    ros2_autostart = ros2_sub.add_parser("autostart", help="Run autostart node")
+    ros2_autostart.set_defaults(func=_ros2_autostart)
+
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
+    args = parser.parse_args()
+    if not args.command:
+        exit_code = _interactive_menu(parser, args.config)
+        raise SystemExit(exit_code)
+
+    try:
+        exit_code = args.func(args)
+    except (ConfigError, RuntimeError) as exc:
+        print(f"Error: {exc}")
+        exit_code = 1
+    except KeyboardInterrupt:
+        exit_code = 130
+
+    raise SystemExit(exit_code)

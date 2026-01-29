@@ -1,0 +1,2 @@
+[console_scripts]
+agi-logger = agi_logger.cli:main
