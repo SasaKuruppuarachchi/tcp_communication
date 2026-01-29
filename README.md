@@ -24,6 +24,12 @@ Interactive CLI and ROS 2 autostart logger for recording ROS 2 bags and transfer
 - Optional background recording via `--background`.
 
 ## Quick start
+- Install (editable):
+    ```bash
+    cd /workspaces/logging/src/agi_logger
+    pip install -e .
+    ```
+- Ensure ROS 2 and px4_msgs are installed and your ROS environment is sourced.
 - Open interactive menu: `agi-logger`
 - Show CLI help: `agi-logger --help`
 - Start recording (foreground): `agi-logger record start`

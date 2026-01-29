@@ -27,9 +27,10 @@ class AutoStartLoggerNode(Node):
         self._manager = RecorderManager(self._config, config_path)
         self._last_arming_state = None
 
+        topic = str(self._logger_cfg.get("auto_start_topic", "/fmu/out/vehicle_status"))
         self._sub = self.create_subscription(
             VehicleStatus,
-            "/fmu/out/vehicle_status",
+            topic,
             self._on_vehicle_status,
             10,
         )

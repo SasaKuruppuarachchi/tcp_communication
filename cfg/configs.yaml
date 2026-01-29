@@ -23,6 +23,7 @@ agi_logger:
     mcap: true
     auto_start: true
     auto_start_behavior: toggle_arm
+    auto_start_topic: /fmu/out/vehicle_status
   tcp_file_communication:
     mode: ask
     server:

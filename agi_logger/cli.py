@@ -28,6 +28,28 @@ RED = "\033[31m"
 LIGHT_GRAY = "\033[90m"
 
 
+def _print_title() -> None:
+    title_lines = [
+        "      █████╗  ██████╗ ██╗██████╗ ██╗██╗  ██╗ ",
+        "     ██╔══██╗██╔════╝ ██║██╔══██╗██║╚██╗██╔╝ ",
+        "     ███████║██║  ███╗██║██████╔╝██║ ╚███╔╝  ",
+        "     ██╔══██║██║   ██║██║██╔═══╝ ██║ ██╔██╗  ",
+        "     ██║  ██║╚██████╔╝██║██║     ██║██╔╝ ██╗ ",
+        "     ╚═╝  ╚═╝ ╚═════╝ ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝ ",
+        "",
+        "██╗      ██████╗  ██████╗  ██████╗ ███████╗██████╗ ",
+        "██║     ██╔═══██╗██╔════╝ ██╔════╝ ██╔════╝██╔══██╗",
+        "██║     ██║   ██║██║  ███╗██║  ███╗█████╗  ██████╔╝",
+        "██║     ██║   ██║██║   ██║██║   ██║██╔══╝  ██╔══██╗",
+        "███████╗╚██████╔╝╚██████╔╝╚██████╔╝███████╗██║  ██║",
+        "╚══════╝ ╚═════╝  ╚═════╝  ╚═════╝ ╚══════╝╚═╝  ╚═╝",
+    ]
+    print()
+    for line in title_lines:
+        print(f"{ORANGE}{line}{RESET}")
+    print(f"{CYAN}    Advanced ROS2 logging for Agibix Platform{RESET}\n")
+
+
 def _load_config(config_path: Path) -> Dict[str, Any]:
     return load_raw_config(config_path)
 
@@ -164,6 +186,27 @@ def _record_start(args: argparse.Namespace) -> int:
     return 0
 
 
+def _record_preview(args: argparse.Namespace) -> int:
+    config = _load_config(args.config)
+    logger_cfg = config.get("agi_logger", {}).get("logger", {})
+    print(f"\n{BOLD}{CYAN}Record settings preview{RESET}")
+    for key, value in logger_cfg.items():
+        print(f"{CYAN}- {key}{RESET}: {LIGHT_GRAY}{value}{RESET}")
+    action = input(
+        f"{BOLD}Continue recording?{RESET} [Enter = start / e = edit / a = autostart / n = cancel]: "
+    ).strip().lower()
+    if action == "e":
+        _settings_menu(args.config, start_section="logger")
+        return 0
+    if action == "a":
+        args = build_parser().parse_args(["--config", str(args.config), "ros2", "autostart"])
+        return args.func(args)
+    if action in {"", "y"}:
+        args = build_parser().parse_args(["--config", str(args.config), "record", "start"])
+        return args.func(args)
+    return 0
+
+
 def _record_stop(args: argparse.Namespace) -> int:
     manager = _get_manager(args.config)
     manager.stop_recording()
@@ -268,27 +311,7 @@ def _run_command(cmd: list[str]) -> int:
 
 
 def _interactive_menu(parser: argparse.ArgumentParser, config_path: Path) -> int:
-    title_lines = [
-        "      █████╗  ██████╗ ██╗██████╗ ██╗██╗  ██╗ ",
-        "     ██╔══██╗██╔════╝ ██║██╔══██╗██║╚██╗██╔╝ ",
-        "     ███████║██║  ███╗██║██████╔╝██║ ╚███╔╝  ",
-        "     ██╔══██║██║   ██║██║██╔═══╝ ██║ ██╔██╗  ",
-        "     ██║  ██║╚██████╔╝██║██║     ██║██╔╝ ██╗ ",
-        "     ╚═╝  ╚═╝ ╚═════╝ ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝ ",
-
-        "██╗      ██████╗  ██████╗  ██████╗ ███████╗██████╗ ",
-        "██║     ██╔═══██╗██╔════╝ ██╔════╝ ██╔════╝██╔══██╗",
-        "██║     ██║   ██║██║  ███╗██║  ███╗█████╗  ██████╔╝",
-        "██║     ██║   ██║██║   ██║██║   ██║██╔══╝  ██╔══██╗",
-        "███████╗╚██████╔╝╚██████╔╝╚██████╔╝███████╗██║  ██║",
-        "╚══════╝ ╚═════╝  ╚═════╝  ╚═════╝ ╚══════╝╚═╝  ╚═╝",
-    ]
-
-
-    print()
-    for line in title_lines:
-        print(f"{ORANGE}{line}{RESET}")
-    print(f"{CYAN}    Advanced ROS2 logging for Agibix Platform{RESET}\n")
+    _print_title()
     print(f"{GREEN}1){RESET} Record")
     print(f"{GREEN}2){RESET} Transfer")
     print(f"{GREEN}3){RESET} Settings")
@@ -363,7 +386,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     record_parser = subparsers.add_parser("record", help="Manage bag recording")
-    record_sub = record_parser.add_subparsers(dest="record_cmd", required=True)
+    record_sub = record_parser.add_subparsers(dest="record_cmd")
 
     record_start = record_sub.add_parser("start", help="Start recording")
     record_start.add_argument(
@@ -378,6 +401,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     record_status = record_sub.add_parser("status", help="Show recording status")
     record_status.set_defaults(func=_record_status)
+
+    record_parser.set_defaults(func=_record_preview)
 
     bag_parser = subparsers.add_parser("bag", help="Bag utilities")
     bag_sub = bag_parser.add_subparsers(dest="bag_cmd", required=True)
@@ -423,6 +448,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+    _print_title()
     if not args.command:
         exit_code = _interactive_menu(parser, args.config)
         raise SystemExit(exit_code)
