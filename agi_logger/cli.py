@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import curses
 from pathlib import Path
 from typing import Any, Dict
 
@@ -111,18 +113,14 @@ def _settings_menu(config_path: Path, start_section: str | None = None) -> None:
             choice = "3_client"
         else:
             print(f"\n{BOLD}{CYAN}Settings menu{RESET}")
-            print(f"{GREEN}1){RESET} Show config")
-            print(f"{GREEN}2){RESET} Edit logger settings")
-            print(f"{GREEN}3){RESET} Edit TCP transfer settings")
-            print(f"{GREEN}4){RESET} Save")
-            print(f"{GREEN}5){RESET} Exit")
+            print(f"{GREEN}1){RESET} Edit logger settings")
+            print(f"{GREEN}2){RESET} Edit TCP transfer settings")
+            print(f"{GREEN}3){RESET} Save")
+            print(f"{GREEN}4){RESET} Back")
             choice = input(f"{BOLD}Select option:{RESET} ").strip()
 
-        if choice == "1":
-            print(f"{MAGENTA}--- config ---{RESET}")
-            print(yaml.safe_dump(config, sort_keys=False))
-        elif choice in {"2", "3", "3_server", "3_client"}:
-            if choice == "2":
+        if choice in {"1", "2", "2_server", "2_client"}:
+            if choice == "1":
                 section_key = "agi_logger.logger"
                 current_section = "logger"
                 section = config
@@ -130,8 +128,8 @@ def _settings_menu(config_path: Path, start_section: str | None = None) -> None:
                     section = section.get(part, {}) if isinstance(section, dict) else {}
                 entries = list(iter_nested_keys(section, section_key))
             else:
-                if choice in {"3_server", "3_client"}:
-                    mode_choice = "server" if choice == "3_server" else "client"
+                if choice in {"2_server", "2_client"}:
+                    mode_choice = "server" if choice == "2_server" else "client"
                 else:
                     mode_choice = input(
                         f"{BOLD}Edit TCP settings for{RESET} [server/client]: "
@@ -231,13 +229,13 @@ def _settings_menu(config_path: Path, start_section: str | None = None) -> None:
                     start_section = "tcp_client"
                     continue
                 return
-        elif choice == "4":
+        elif choice == "3":
             save_raw_config(config, config_path)
             print(f"{GREEN}Saved to {config_path}{RESET}")
             dirty_logger.clear()
             dirty_tcp_server.clear()
             dirty_tcp_client.clear()
-        elif choice == "5":
+        elif choice == "4":
             return
         else:
             print(f"{RED}Invalid selection{RESET}")
@@ -437,69 +435,165 @@ def _run_command(cmd: list[str]) -> int:
         return 1
 
 
+def _list_bag_dirs(path: str) -> list[str]:
+    base = Path(path).expanduser()
+    if not base.exists():
+        return []
+    return sorted([p.name for p in base.iterdir() if p.is_dir()])
+
+
+def _curses_select(options: list[str], title: str, hint: str) -> tuple[str, int | None]:
+    def _inner(stdscr: "curses._CursesWindow") -> tuple[str, int | None]:
+        curses.curs_set(0)
+        stdscr.nodelay(False)
+        stdscr.keypad(True)
+
+        index = 0
+        offset = 0
+
+        while True:
+            stdscr.erase()
+            height, width = stdscr.getmaxyx()
+            visible = max(1, height - 6)
+
+            stdscr.addstr(0, 0, title[: width - 1])
+            stdscr.addstr(1, 0, hint[: width - 1])
+
+            if not options:
+                stdscr.addstr(3, 0, "No bags found.")
+            else:
+                if index < offset:
+                    offset = index
+                elif index >= offset + visible:
+                    offset = index - visible + 1
+
+                for row in range(visible):
+                    opt_index = offset + row
+                    if opt_index >= len(options):
+                        break
+                    label = options[opt_index]
+                    line = f"{label}"
+                    y = row + 3
+                    if opt_index == index:
+                        stdscr.addstr(y, 0, line[: width - 1], curses.A_REVERSE)
+                    else:
+                        stdscr.addstr(y, 0, line[: width - 1])
+
+            stdscr.refresh()
+            key = stdscr.getch()
+
+            if key in (curses.KEY_UP, ord("k")):
+                if options:
+                    index = max(0, index - 1)
+            elif key in (curses.KEY_DOWN, ord("j")):
+                if options:
+                    index = min(len(options) - 1, index + 1)
+            elif key in (curses.KEY_ENTER, 10, 13):
+                if options:
+                    return "play", index
+            elif key in (ord("c"), ord("C")):
+                return "change", None
+            elif key in (ord("q"), 27):
+                return "cancel", None
+
+    return curses.wrapper(_inner)
+
+
+def _play_menu(config_path: Path, initial_path: str | None = None) -> int:
+    config = _load_config(config_path)
+    logger_cfg = config.get("agi_logger", {}).get("logger", {})
+    bag_path = initial_path or str(logger_cfg.get("bag_path", "."))
+
+    while True:
+        options = _list_bag_dirs(bag_path)
+        title = f"Select a bag to play (path: {bag_path})"
+        hint = "UP/DOWN to select, Enter to play, c change dir, q back"
+        action, index = _curses_select(options, title, hint)
+
+        if action == "cancel":
+            return 0
+        if action == "change":
+            new_path = input("Enter absolute bag directory path: ").strip()
+            if new_path:
+                bag_path = new_path
+            continue
+        if action == "play" and index is not None:
+            selected = options[index]
+            full_path = str(Path(bag_path).expanduser() / selected)
+            cmd = ["ros2", "bag", "play", full_path]
+            return _run_command(cmd)
+
+
+def _play_command(args: argparse.Namespace) -> int:
+    return _play_menu(args.config, args.path)
+
+
 def _interactive_menu(parser: argparse.ArgumentParser, config_path: Path) -> int:
-    _clear_screen()
-    _print_title()
-    print(f"{GREEN}1){RESET} Record")
-    print(f"{GREEN}2){RESET} Transfer")
-    print(f"{GREEN}3){RESET} Settings")
-    print(f"{GREEN}4){RESET} Exit")
-    choice = input(f"{BOLD}Select option:{RESET} ").strip()
+    while True:
+        _clear_screen()
+        _print_title()
+        print(f"{GREEN}1){RESET} Record")
+        print(f"{GREEN}2){RESET} Transfer")
+        print(f"{GREEN}3){RESET} Play")
+        print(f"{GREEN}4){RESET} Settings")
+        print(f"{GREEN}5){RESET} Exit")
+        choice = input(f"{BOLD}Select option:{RESET} ").strip()
 
-    if choice == "1":
-        config = _load_config(config_path)
-        logger_cfg = config.get("agi_logger", {}).get("logger", {})
-        print(f"\n{BOLD}{CYAN}Record settings preview{RESET}")
-        for key, value in logger_cfg.items():
-            print(f"{CYAN}- {key}{RESET}: {LIGHT_GRAY}{value}{RESET}")
-        action = input(
-            f"{BOLD}Continue recording?{RESET} [Enter = start / e = edit / n = back]: "
-        ).strip().lower()
-        if action == "e":
-            _settings_menu(config_path, start_section="logger")
+        if choice == "1":
+            _record_preview(parser.parse_args(["--config", str(config_path), "record"]))
+            continue
+
+        if choice == "2":
+            while True:
+                _clear_screen()
+                print(f"{BOLD}{CYAN}Transfer{RESET}")
+                print(f"{GREEN}1){RESET} Server")
+                print(f"{GREEN}2){RESET} Client")
+                print(f"{GREEN}3){RESET} Back")
+                sub = input(f"{BOLD}Select option:{RESET} ").strip()
+                if sub == "3" or sub == "":
+                    break
+                if sub not in {"1", "2"}:
+                    continue
+
+                config = _load_config(config_path)
+                tcp_cfg = config.get("agi_logger", {}).get("tcp_file_communication", {})
+                mode = "server" if sub == "1" else "client"
+                mode_cfg = tcp_cfg.get(mode, {})
+
+                _clear_screen()
+                print(f"\n{BOLD}{CYAN}TCP {mode} settings preview{RESET}")
+                for key, value in mode_cfg.items():
+                    print(f"{CYAN}- {key}{RESET}: {LIGHT_GRAY}{value}{RESET}")
+                action = input(
+                    f"{BOLD}Continue transfer?{RESET} [Enter = start / e = edit / n = back]: "
+                ).strip().lower()
+                if action == "e":
+                    _settings_menu(
+                        config_path,
+                        start_section="tcp_server" if mode == "server" else "tcp_client",
+                    )
+                    continue
+                if action in {"", "y"}:
+                    cmd = "send" if mode == "server" else "receive"
+                    args = parser.parse_args(["--config", str(config_path), "tcp", cmd])
+                    args.func(args)
+                continue
+
+        if choice == "3":
+            args = parser.parse_args(["--config", str(config_path), "play"])
+            args.func(args)
+            continue
+
+        if choice == "4":
+            args = parser.parse_args(["--config", str(config_path), "settings"])
+            args.func(args)
+            continue
+
+        if choice == "5":
             return 0
-        if action in {"", "y"}:
-            args = parser.parse_args(["--config", str(config_path), "record", "start"])
-            return args.func(args)
-        return 0
 
-    if choice == "2":
-        print(f"\n{BOLD}{CYAN}Transfer{RESET}")
-        print(f"{GREEN}1){RESET} Server")
-        print(f"{GREEN}2){RESET} Client")
-        print(f"{GREEN}3){RESET} Back")
-        sub = input(f"{BOLD}Select option:{RESET} ").strip()
-        if sub not in {"1", "2"}:
-            return 0
-
-        config = _load_config(config_path)
-        tcp_cfg = config.get("agi_logger", {}).get("tcp_file_communication", {})
-        mode = "server" if sub == "1" else "client"
-        mode_cfg = tcp_cfg.get(mode, {})
-
-        print(f"\n{BOLD}{CYAN}TCP {mode} settings preview{RESET}")
-        for key, value in mode_cfg.items():
-            print(f"{CYAN}- {key}{RESET}: {LIGHT_GRAY}{value}{RESET}")
-        action = input(
-            f"{BOLD}Continue transfer?{RESET} [Enter = start / e = edit / n = back]: "
-        ).strip().lower()
-        if action == "e":
-            _settings_menu(
-                config_path,
-                start_section="tcp_server" if mode == "server" else "tcp_client",
-            )
-            return 0
-        if action in {"", "y"}:
-            cmd = "send" if mode == "server" else "receive"
-            args = parser.parse_args(["--config", str(config_path), "tcp", cmd])
-            return args.func(args)
-        return 0
-
-    if choice == "3":
-        args = parser.parse_args(["--config", str(config_path), "settings"])
-        return args.func(args)
-
-    return 0
+        continue
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -539,6 +633,10 @@ def build_parser() -> argparse.ArgumentParser:
     bag_play.add_argument("--rate", type=float, default=1.0, help="Playback rate")
     bag_play.add_argument("--loop", action="store_true", help="Loop playback")
     bag_play.set_defaults(func=_bag_play)
+
+    play_parser = subparsers.add_parser("play", help="Select and play a bag")
+    play_parser.add_argument("--path", help="Override bag directory path")
+    play_parser.set_defaults(func=_play_command)
 
     tcp_parser = subparsers.add_parser("tcp", help="TCP file transfer")
     tcp_sub = tcp_parser.add_subparsers(dest="tcp_cmd", required=True)
