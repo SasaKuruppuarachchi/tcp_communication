@@ -5,9 +5,18 @@ agi_logger:
     topics:
     - /drone0/livox/lidar
     - /drone0/livox/imu
-    - /fmu/out/sensor_combined
+    - /camera/camera/color/image_raw/compressed
+    - /camera/camera/color/camera_info
+    - /drone0/camera/image/compressed
+    - /drone0/camera/camera_info
     - /drone0/px4_imu
-    name: lio_test_w_sync
+    - /drone0/adaptive_lio/state/odom
+    - /drone0/adaptive_lio/odometry_path
+    - /drone0/adaptive_lio/scan
+    - /fmu/out/vehicle_gps_position
+    - /tf
+    - /tf_static
+    name: forrest_test_1
     max_bag_size: 1
     override_qos: false
     qos_settings: cfg/qos_profiles.yaml

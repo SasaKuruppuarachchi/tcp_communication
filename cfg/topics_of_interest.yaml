@@ -6,22 +6,31 @@ topics:
     name: /drone0/livox/imu
     type: sensor_msgs/msg/Imu
   realsense_color:
-    name: /drone0/RealSense_Camera/color/image_raw
+    name: /camera/camera/color/image_raw
     type: sensor_msgs/msg/Image
+  realsense_color_compressed:
+    name: /camera/camera/color/image_raw/compressed
+    type: sensor_msgs/msg/CompressedImage
   realsense_depth:
-    name: /drone0/RealSense_Camera/depth
+    name: /camera/camera/depth/image_rect_raw
     type: sensor_msgs/msg/PointCloud2
+  realsense_depth_compressed:
+    name: /camera/camera/depth/image_rect_raw/compressed
+    type: sensor_msgs/msg/CompressedImage
   realsence_camera_info:
-    name: /drone0/RealSense_Camera/color/camera_info
+    name: /camera/camera/color/camera_info
     type: sensor_msgs/msg/CameraInfo
   realsence_depth_info:
-    name: /drone0/RealSense_Camera/depth/camera_info
+    name: /camera/camera/depth/camera_info
     type: sensor_msgs/msg/CameraInfo
   rgb1_image_raw:
-    name: /rgb1/image_raw
+    name: /drone0/camera/image
     type: sensor_msgs/msg/Image
+  rgb1_image_compressed:
+    name: /drone0/camera/image/compressed
+    type: sensor_msgs/msg/CompressedImage
   rgb1_camera_info:
-    name: /rgb1/camera_info
+    name: /drone0/camera/camera_info
     type: sensor_msgs/msg/CameraInfo
   px4_sensor_combined:
     name: /fmu/out/sensor_combined
