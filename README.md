@@ -1,4 +1,4 @@
-# Agipix Logger (`agi-logger`) — Release 1.0
+# `agi-logger`
 
 ```
       █████╗  ██████╗ ██╗██████╗ ██╗██╗  ██╗ 
@@ -17,7 +17,7 @@
     Production ROS 2 Logging & Network Transport Utility for Agipix Platform
 ```
 
-**`agi-logger` v1.0** is an enterprise-grade, robotics-tailored telemetry recording, network distribution, and playback management framework for ROS 2. It unifies high-throughput `rosbag2` recording (MCAP + ZSTD compression), autonomous drone arm/disarm lifecycle automation, real-time hardware health guards (0.1 Hz RAM & disk monitoring), a full terminal UI (TUI), and socket-level TCP batch bag transfers.
+**`agi-logger` v1.0** is a robotics-tailored telemetry recording, network distribution, and playback management framework for ROS 2. It unifies high-throughput `rosbag2` recording (MCAP + ZSTD compression), autonomous drone arm/disarm lifecycle automation, real-time hardware health guards (0.1 Hz RAM & disk monitoring), a full terminal UI (TUI), and socket-level TCP batch bag transfers.
 
 ---
 
@@ -30,6 +30,22 @@
 - **Queue-Starvation Prevention in Playback**: Pre-configured `--read-ahead-queue-size 10000` eliminates stuttering and warnings during compressed bag playback.
 - **TCP Multi-Bag Batch Transfer**: Interactive checkbox selector for transferring multiple bag directories in a single connection with live progress metrics and inline Host/Port editing.
 - **Process Group Isolation**: Recorder child processes run in isolated process groups (`start_new_session=True`), preventing orphaned rosbag processes on exit.
+
+## 🌟 Release 1.2 Highlights
+
+### 1. Direct Socket Streaming for Directory Bags (Zero Latency & 0 Disk Overhead)
+- **Eliminated Pre-Archiving Latency**: Bag directory archives are now streamed directly into the TCP socket on-the-fly using chunked framing and streaming tar (`mode="w|"`).
+- **Instant Transfer Startup**: Reduced initial delay from **>3 minutes to <5 ms** on multi-gigabyte bags, resolving the 60-second client connection timeout (`TimeoutError: timed out`).
+- **Zero Temporary Disk Usage**: Removed temporary `.tar.gz` creation and extraction in `/tmp`, eliminating gigabytes of redundant disk read/write churn.
+
+### 2. Bidirectional Version Handshake Check
+- Added an automatic version handshake (`AGI_LOGGER_VERSION:<version>`) during TCP connection initialization.
+- Prominently alerts operators if connecting between mismatched versions or legacy clients that might cause transfer corruption due to protocol differences.
+
+### 3. CLI & Packaging Improvements
+- Added `agi-logger --version` command-line flag.
+- Full support for mixed batch transfers (nested bag directories alongside standalone log files).
+
 
 ---
 
@@ -67,9 +83,11 @@
 
 | Task | One-Liner Command |
 | :--- | :--- |
-| **Interactive Bag Playback Selector** | `agi-logger play` |
+| **Interactive Bag Playback Selector** | `agi-logger play` *(press `t` to toggle `--clock`)* |
 | **Bag Playback from Specific Directory** | `agi-logger play --path /workspaces/logging/test_bags` |
 | **Direct Bag Playback (Rate & Loop Controls)** | `agi-logger bag play /path/to/bag --rate 1.5 --loop` |
+| **Bag Playback with Clock Topic (Default)** | `agi-logger bag play /path/to/bag --clock` |
+| **Bag Playback without Clock Topic** | `agi-logger bag play /path/to/bag --no-clock` |
 | **Bag Playback with Custom Pre-fetch Queue** | `agi-logger bag play /path/to/bag --read-ahead-queue-size 10000` |
 | **Direct Configuration Editor** | `agi-logger settings` |
 
@@ -143,12 +161,14 @@ graph TD
   - Pressing **`q`** stops recording/monitoring cleanly and exits the application.
 
 ### 3. TCP Batch Transfer Engine (`tcp_transfer`)
-- **Streaming Pipeline**: Archives bag folders on-the-fly into gzip archives, streams over socket, and extracts directly into target directories on the receiving client.
-- **Batch Transfer Protocol**: Multi-bag transfers (`BATCH:<count>`) synchronized with line-delimited control messages to avoid TCP stream frame overlap.
+- **Direct Streaming Pipeline**: Streams bag directory tar archives on-the-fly directly over the TCP socket with chunked framing, extracting in real time onto the receiving client without writing temporary archive files or CPU-heavy compression delays.
+- **Batch Transfer Protocol**: Multi-bag transfers (`BATCH:<count>`) synchronized with line-delimited control messages and chunked frame boundaries to prevent socket frame overlap.
 - **Interactive Multi-Select Checklist**: Checkbox tick-list with directory navigation and direct inline editing of Host IP and Port on the preview screen.
 
 ### 4. Interactive Bag Playback (`_play_menu`)
 - Scrollable curses selector listing all recorded bags with size indicators.
+- **Interactive Topic Filtering**: After choosing a bag, an interactive checkbox list displays all topics found in the bag (with types and message counts). All topics are **ticked ON by default** (`[x]`), allowing users to selectively tick off conflicting/unwanted topics (such as raw PX4 bridge topics) before playback.
+- **Clock Topic Toggle**: Live toggle for `--clock` (default `ON` / `True`) by pressing **`t`** directly in the selector before playing.
 - Non-blocking PTY execution: pressing **`q`** stops playback and returns to the list immediately, while preserving standard ROS 2 player keyboard controls (`Space` for pause, `Arrows` for step).
 - Pre-configured `--read-ahead-queue-size 10000` eliminates queue starvation warnings on compressed bags.
 
@@ -215,6 +235,8 @@ Output:
 tests/test_cli_helpers.py::test_parse_values PASSED
 tests/test_cli_helpers.py::test_format_display_value PASSED
 tests/test_cli_helpers.py::test_build_parser PASSED
+tests/test_cli_helpers.py::test_bag_play_command_build PASSED
+tests/test_cli_helpers.py::test_get_bag_topics PASSED
 tests/test_cli_helpers.py::test_load_topics_catalogue PASSED
 tests/test_config.py::test_load_and_save_raw_config PASSED
 tests/test_config.py::test_update_nested_value PASSED
@@ -237,5 +259,7 @@ tests/test_tcp_transfer.py::test_get_host_ips PASSED
 tests/test_tcp_transfer.py::test_tcp_transfer_single_file PASSED
 tests/test_tcp_transfer.py::test_tcp_transfer_directory_bag PASSED
 tests/test_tcp_transfer.py::test_tcp_transfer_multiple_bags_batch PASSED
-============= 25 passed in 1.05s ==============
+tests/test_tcp_transfer.py::test_tcp_transfer_mixed_batch_with_nested_directories PASSED
+tests/test_tcp_transfer.py::test_version_compatibility_check PASSED
+============= 29 passed in 1.48s ==============
 ```

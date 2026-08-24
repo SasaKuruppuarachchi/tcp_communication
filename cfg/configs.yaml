@@ -1,7 +1,7 @@
 agi_logger:
   verbosity: INFO
   logger:
-    bag_path: /workspaces/logging/test_bags
+    bag_path: /workspaces/logging/test_bags/after_fix_1_and_2
     topics:
     - /drone0/livox/lidar
     - /drone0/livox/imu
@@ -35,6 +35,6 @@ agi_logger:
       file_path: /workspaces/logging/bags/agi_log_20260128_115034_climb_test
       host: 0.0.0.0
     client:
-      host: localhost
+      host: 192.168.0.85
       port: 6000
-      destination_path: ~/workspace/logging/bags/test_receive
+      destination_path: /workspaces/logging/test_recieve
